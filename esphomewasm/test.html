@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test DisplayEffects</title>
+    <script src="testfireeffect.js"></script>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <script>
+
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      const width = 16;
+      const height = 16;
+      const arrayDataToPass = new ArrayBuffer(width*height);
+      const typedArray = new Uint32Array(width*height)
+
+      const onResize = () => {
+        canvas.width = width*10;
+        canvas.height = height*10;
+      };
+      window.addEventListener("resize", onResize);
+      onResize();
+
+      const effectLoop = Module.cwrap('Loop', 'void');
+
+      const effectInit = function() {
+
+        let buffer
+        let error
+        let result
+        let resultArray
+
+        try {
+          // Init the typed array with the same length as the number of items in the array parameter
+          // Populate the array with the values
+          for (let i=0; i<arrayDataToPass.length; i++) {
+              typedArray[i] = arrayDataToPass[i]
+          }
+
+          // Allocate some space in the heap for the data (making sure to use the appropriate memory size of the elements)
+          buffer = Module._malloc(typedArray.length * typedArray.BYTES_PER_ELEMENT)
+
+          // Assign the data to the heap - Keep in mind bytes per element
+          Module.HEAPU32.set(typedArray, buffer >> 4)
+
+          // Finally, call the function with "number" parameter type for the array (the pointer), and an extra length parameter
+          //const outputPointer = Module._malloc(8);
+
+          const resultPointer = Module.ccall("Init", "number", ["number", "number", "number"], [buffer, width, height])
+
+          //todo: pass result back to javasscript array
+          //let offset = Module.getValue(resultPointer, "i64");
+          //console.log(offset);
+          //let offset = typedArray.length*typedArray.BYTES_PER_ELEMENT
+
+          resultArray = new Uint8Array(
+            Module.HEAPU8.subarray(
+              resultPointer ,
+              resultPointer + typedArray.byteLength
+            )
+          );
+          //const decodedResults = msgpack.decode(resultArray);
+
+        } catch (e) {
+          error = e
+        } finally {
+          // To avoid memory leaks we need to always clear out the allocated heap data
+          // This needs to happen in the finally block, otherwise thrown errors will stop code execution before this happens
+          Module._free(buffer)
+        }
+        // Finally, throw any errors so that we know when something goes wrong
+        if (error) throw error
+        console.log('init:', resultArray)
+      }
+
+      const effectGetBuffer = function() {
+        let error
+        let resultArray
+        try {
+          const resultPointer = Module.ccall("GetBuffer", "number",[],[])
+          resultArray = new Uint8Array(
+            Module.HEAPU8.subarray(
+              resultPointer ,
+              resultPointer + typedArray.byteLength
+            )
+          );
+          //const decodedResults = msgpack.decode(resultArray);
+        } catch (e) {
+          error = e
+        } finally {
+        }
+        // Finally, throw any errors so that we know when something goes wrong
+        if (error) throw error
+        //console.log('getbuffer:', resultArray)
+        return resultArray;
+      }
+
+      const draw = function() {
+        effectLoop();
+        const resultArray = effectGetBuffer();
+        console.log('getbuffer:', resultArray)
+
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, width*10, height*10);
+
+        for (let x = 0; x < width; x++) {
+          for (let y = 0; y < height; y++) {
+            // draw pixel
+            const pixelIndex = (y * width + x) * 4;
+            r = resultArray[pixelIndex];
+            g = resultArray[pixelIndex+1];
+            b = resultArray[pixelIndex+2];
+            ctx.fillStyle = "rgba(" + r + "," + g + "," + b + ", 0.9)";
+            ctx.fillRect(x*10, y*10, 10, 10);
+          }
+        }
+
+        ctx.strokeStyle = "black";
+        for(let x = 0; x < width*10; x+=10){
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height*10);
+            ctx.stroke();
+        }
+        for(let y = 0; y < height*10; y+=10){
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width*10, y);
+            ctx.stroke();
+        }
+        requestAnimationFrame(draw);
+      }
+
+      Module.onRuntimeInitialized = () => {
+        effectInit();
+        draw();
+      };
+    </script>
+  </body>
+</html>
